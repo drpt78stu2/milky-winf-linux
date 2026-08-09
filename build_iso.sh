@@ -159,6 +159,19 @@ mkdir -p "$ROOTFS_DIR"
 
 sudo pacstrap -c "$ROOTFS_DIR" base gcc boost boost-libs git nano
 
+echo "==> Setting root password and enabling auto-login (fresh pacstrap accounts have no valid password)"
+echo "root:live" | sudo arch-chroot "$ROOTFS_DIR" chpasswd
+echo "    Root password set to: live"
+
+# Auto-login on tty1 so you land straight at a shell without needing the password at all
+sudo mkdir -p "$ROOTFS_DIR/etc/systemd/system/getty@tty1.service.d"
+sudo tee "$ROOTFS_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" > /dev/null <<'AUTOLOGIN_EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+AUTOLOGIN_EOF
+echo "    Auto-login enabled on tty1 — should boot straight to a root shell, no password needed"
+
 echo "==> Squashing root filesystem (this can take a few minutes)"
 rm -f "$WORKDIR/airootfs.sfs"
 # Using gzip (zlib) compression instead of xz — zlib support is effectively always
