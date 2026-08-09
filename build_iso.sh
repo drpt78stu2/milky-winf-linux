@@ -90,6 +90,8 @@ make localmodconfig
 echo "==> Force-enabling filesystem/loop support needed to boot a squashfs-based live ISO"
 echo "    (these might not be in your trimmed config if you're not currently using them)"
 scripts/config --enable CONFIG_SQUASHFS
+scripts/config --enable CONFIG_SQUASHFS_ZLIB
+scripts/config --enable CONFIG_SQUASHFS_XZ
 scripts/config --enable CONFIG_ISO9660_FS
 scripts/config --enable CONFIG_BLK_DEV_LOOP
 scripts/config --enable CONFIG_OVERLAY_FS
@@ -159,7 +161,11 @@ sudo pacstrap -c "$ROOTFS_DIR" base gcc boost boost-libs git nano
 
 echo "==> Squashing root filesystem (this can take a few minutes)"
 rm -f "$WORKDIR/airootfs.sfs"
-sudo mksquashfs "$ROOTFS_DIR" "$WORKDIR/airootfs.sfs" -comp xz -noappend
+# Using gzip (zlib) compression instead of xz — zlib support is effectively always
+# present whenever CONFIG_SQUASHFS=y, whereas xz decompression needs a separate
+# kernel config option (CONFIG_SQUASHFS_XZ) that may not be enabled. Larger output
+# file than xz, but guaranteed to actually mount with your current kernel.
+sudo mksquashfs "$ROOTFS_DIR" "$WORKDIR/airootfs.sfs" -comp gzip -noappend
 
 # ---- Build a small BusyBox initramfs whose only job is to find and boot the squashfs ----
 echo "==> Building boot initramfs (mounts the ISO, loop-mounts the squashfs, switches root)"
