@@ -63,7 +63,7 @@ fi
 echo "==> Installing build dependencies"
 sudo pacman -Syu --needed --noconfirm \
     base-devel ncurses bison flex openssl libelf bc cpio \
-    grub xorriso mtools busybox ccache squashfs-tools arch-install-scripts
+    grub xorriso mtools busybox ccache squashfs-tools arch-install-scripts pv
 
 echo "==> Enabling ccache for this build (speeds up rebuilds significantly)"
 export PATH="/usr/lib/ccache/bin:$PATH"
@@ -125,7 +125,7 @@ sudo mksquashfs "$ROOTFS_DIR" "$WORKDIR/airootfs.sfs" -comp xz -noappend
 echo "==> Building boot initramfs (mounts the ISO, loop-mounts the squashfs, switches root)"
 INITRD_DIR="$WORKDIR/initramfs"
 rm -rf "$INITRD_DIR"
-mkdir -p "$INITRD_DIR"/{bin,sbin,etc,proc,sys,dev,mnt/cdrom,newroot,usr/bin,usr/sbin}
+mkdir -p "$INITRD_DIR"/{bin,sbin,etc,proc,sys,dev,mnt/cdrom,mnt/test,newroot,usr/bin,usr/sbin}
 cp "$(command -v busybox)" "$INITRD_DIR/bin/busybox"
 
 cd "$INITRD_DIR"
@@ -139,23 +139,81 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || mdev -s
 
-echo "Looking for boot media labeled ${ISO_LABEL}..."
+echo "=================================================="
+echo "  Boot init starting — looking for live media"
+echo "=================================================="
+echo "Available block devices:"
+ls -la /dev/sd* /dev/sr* 2>/dev/null
+echo "--------------------------------------------------"
+
+DEV=""
+
+# Method 1: find by ISO volume label
+echo "Trying blkid label lookup for ${ISO_LABEL}..."
 for i in 1 2 3 4 5 6 7 8 9 10; do
     DEV=\$(blkid -L "${ISO_LABEL}" 2>/dev/null)
-    [ -n "\$DEV" ] && break
+    [ -n "\$DEV" ] && echo "Found via label: \$DEV" && break
     sleep 1
 done
 
+# Method 2: fall back to scanning likely candidates directly if label lookup failed
 if [ -z "\$DEV" ]; then
-    echo "ERROR: could not find device labeled ${ISO_LABEL}. Dropping to shell."
+    echo "Label lookup failed — scanning /dev/sr* and /dev/sd*1 directly..."
+    for candidate in /dev/sr0 /dev/sr1 /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sdd1; do
+        if [ -b "\$candidate" ]; then
+            mkdir -p /mnt/test
+            if mount -t iso9660 -o ro "\$candidate" /mnt/test 2>/dev/null; then
+                if [ -f /mnt/test/LiveOS/airootfs.sfs ]; then
+                    echo "Found valid live media at: \$candidate"
+                    DEV="\$candidate"
+                    umount /mnt/test
+                    break
+                fi
+                umount /mnt/test
+            fi
+        fi
+    done
+fi
+
+if [ -z "\$DEV" ]; then
+    echo "=================================================="
+    echo "ERROR: could not find boot media by label or by scanning."
+    echo "Diagnostic info — actual device labels found:"
+    blkid
+    echo "Dropping to a BusyBox rescue shell — git/gcc will NOT be available here."
+    echo "Run 'blkid' and 'ls /dev' manually to investigate, then 'mount' by hand."
+    echo "=================================================="
     exec /bin/sh
 fi
 
-mount -t iso9660 -o ro "\$DEV" /mnt/cdrom
-mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /newroot
+echo "Mounting \$DEV as ISO..."
+mount -t iso9660 -o ro "\$DEV" /mnt/cdrom || {
+    echo "ERROR: failed to mount \$DEV as iso9660. Dropping to rescue shell."
+    exec /bin/sh
+}
 
-echo "Booting into full root filesystem..."
-exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/sh
+if [ ! -f /mnt/cdrom/LiveOS/airootfs.sfs ]; then
+    echo "ERROR: /mnt/cdrom/LiveOS/airootfs.sfs not found on mounted media."
+    echo "Contents of /mnt/cdrom:"
+    ls -la /mnt/cdrom
+    echo "Dropping to rescue shell."
+    exec /bin/sh
+fi
+
+echo "Loop-mounting the squashfs root filesystem..."
+mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /newroot || {
+    echo "ERROR: failed to mount squashfs. Dropping to rescue shell."
+    exec /bin/sh
+}
+
+if [ ! -x /newroot/sbin/init ] && [ ! -x /newroot/usr/lib/systemd/systemd ]; then
+    echo "WARNING: no /sbin/init or systemd found in root filesystem."
+    echo "Contents of /newroot:"
+    ls -la /newroot
+fi
+
+echo "Switching to full root filesystem (g++, Boost, git should be available after this)..."
+exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
 EOF
 chmod +x init
 
@@ -204,9 +262,44 @@ echo "  sudo pacman -S --needed qemu-full"
 echo "  qemu-system-x86_64 -cdrom $WORKDIR/$ISO_NAME -m 2048"
 echo "  (bumped to 2048MB RAM here since the full rootfs needs more than the old BusyBox image did)"
 echo
-echo "To write it to a USB drive (THIS ERASES THE DRIVE):"
-echo "  1. Find the device: lsblk"
-echo "  2. sudo dd if=$WORKDIR/$ISO_NAME of=/dev/sdX bs=4M status=progress oflag=sync"
-echo "     (replace /dev/sdX with your actual USB device, NOT a partition like /dev/sdX1)"
-echo
 echo "Next time you rebuild after code changes, ccache will make it much faster automatically."
+
+# ---- Interactive: choose a USB device to burn the ISO to ----
+echo
+echo "=================================================================="
+echo " Available disks/devices on this system:"
+echo "=================================================================="
+lsblk -d -o NAME,SIZE,MODEL,TRAN,TYPE | grep -E "disk|NAME"
+echo "=================================================================="
+echo
+echo "Which device do you want to write the ISO to?"
+echo "Enter the device name only (e.g. sdb) — NOT a partition (e.g. sdb1) — or leave blank to skip."
+read -r -p "Device: " TARGET_DEV
+
+if [ -z "$TARGET_DEV" ]; then
+    echo "No device entered — skipping USB write. Your ISO is still available at:"
+    echo "  $WORKDIR/$ISO_NAME"
+else
+    TARGET_PATH="/dev/${TARGET_DEV#/dev/}"
+
+    if [ ! -b "$TARGET_PATH" ]; then
+        echo "ERROR: $TARGET_PATH does not look like a valid block device. Aborting write."
+        echo "Your ISO is still available at: $WORKDIR/$ISO_NAME"
+    else
+        echo
+        echo "WARNING: this will PERMANENTLY ERASE all data on $TARGET_PATH."
+        lsblk "$TARGET_PATH"
+        echo
+        read -r -p "Type YES (all caps) to confirm writing to $TARGET_PATH: " CONFIRM
+
+        if [ "$CONFIRM" = "YES" ]; then
+            echo "==> Writing $ISO_NAME to $TARGET_PATH ..."
+            pv "$WORKDIR/$ISO_NAME" | sudo dd of="$TARGET_PATH" bs=4M oflag=sync
+            sync
+            echo "==> Done writing to $TARGET_PATH."
+        else
+            echo "Confirmation not received — skipping USB write. Your ISO is still available at:"
+            echo "  $WORKDIR/$ISO_NAME"
+        fi
+    fi
+fi
