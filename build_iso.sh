@@ -63,7 +63,7 @@ fi
 echo "==> Installing build dependencies"
 sudo pacman -Syu --needed --noconfirm \
     base-devel ncurses bison flex openssl libelf bc cpio \
-    grub xorriso mtools busybox ccache squashfs-tools arch-install-scripts pv
+    grub xorriso mtools busybox ccache squashfs-tools arch-install-scripts pv qemu-full
 
 echo "==> Enabling ccache for this build (speeds up rebuilds significantly)"
 export PATH="/usr/lib/ccache/bin:$PATH"
@@ -179,6 +179,12 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || mdev -s
 
+# Redirect this script's own output (and input) to the serial console explicitly.
+# Without this, our echo statements go to whichever console is "primary" (often
+# the graphical tty0 window), while kernel messages go to both — causing the
+# serial log (captured by qemu -serial stdio) to look incomplete.
+exec 0</dev/ttyS0 1>/dev/ttyS0 2>&1
+
 echo "=================================================="
 echo "  Boot init starting — looking for live media"
 echo "=================================================="
@@ -188,19 +194,26 @@ echo "--------------------------------------------------"
 
 DEV=""
 
-# Method 1: find by ISO volume label
-echo "Trying blkid label lookup for ${ISO_LABEL}..."
+# Method 1: parse plain `blkid` output and match by filesystem TYPE, not label.
+# BusyBox's blkid doesn't reliably support -L (label search), and grub-mkrescue's
+# hybrid ISOs can have multiple partitions sharing the same label (e.g. an hfsplus
+# partition for Mac boot support) — so we match specifically on TYPE="iso9660"
+# to get the real data partition, not a decoy.
+echo "Scanning blkid output for an iso9660 filesystem..."
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-    DEV=\$(blkid -L "${ISO_LABEL}" 2>/dev/null)
-    [ -n "\$DEV" ] && echo "Found via label: \$DEV" && break
+    DEV=\$(blkid 2>/dev/null | grep 'TYPE="iso9660"' | cut -d: -f1 | head -n1)
+    [ -n "\$DEV" ] && echo "Found via blkid TYPE match: \$DEV" && break
     echo "  attempt \$i: not found yet, current /dev/sd*: \$(ls /dev/sd* 2>/dev/null || echo none)"
     sleep 1
 done
 
-# Method 2: fall back to scanning likely candidates directly if label lookup failed
+# Method 2: fall back to scanning likely candidates directly if blkid parsing failed.
+# Includes WHOLE-DISK devices (/dev/sda, not just /dev/sda1) since grub-mkrescue
+# hybrid ISOs put the iso9660 filesystem on the raw disk device, not a partition.
 if [ -z "\$DEV" ]; then
-    echo "Label lookup failed — scanning /dev/sr* and /dev/sd*1 directly..."
-    for candidate in /dev/sr0 /dev/sr1 /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sdd1; do
+    echo "blkid parsing failed — scanning whole-disk and partition devices directly..."
+    for candidate in /dev/sr0 /dev/sr1 /dev/sda /dev/sdb /dev/sdc /dev/sdd \\
+                      /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sdd1; do
         if [ -b "\$candidate" ]; then
             mkdir -p /mnt/test
             if mount -t iso9660 -o ro "\$candidate" /mnt/test 2>/dev/null; then
@@ -304,6 +317,32 @@ echo "  qemu-system-x86_64 -cdrom $WORKDIR/$ISO_NAME -m 2048"
 echo "  (bumped to 2048MB RAM here since the full rootfs needs more than the old BusyBox image did)"
 echo
 echo "Next time you rebuild after code changes, ccache will make it much faster automatically."
+
+# ---- Interactive: test the ISO in QEMU before touching real hardware/USB ----
+echo
+echo "=================================================================="
+echo " Quick VM test (recommended before writing to USB or real hardware)"
+echo "=================================================================="
+read -r -p "Boot this ISO in QEMU now to test it? [y/N]: " RUN_QEMU
+
+if [ "$RUN_QEMU" = "y" ] || [ "$RUN_QEMU" = "Y" ]; then
+    QEMU_LOG="$WORKDIR/qemu-boot.log"
+    echo "==> Launching QEMU (close the QEMU window, or Ctrl+C here, to stop the test)"
+    echo "    Booting as a USB mass-storage device (matches how a real USB stick behaves)"
+    echo "    with 2048MB RAM. Boot output is also being saved as plain text to: $QEMU_LOG"
+    echo "    ISO path: $WORKDIR/$ISO_NAME"
+    qemu-system-x86_64 -m 2048 \
+        -device qemu-xhci \
+        -drive if=none,id=stick,format=raw,file="$WORKDIR/$ISO_NAME" \
+        -device usb-storage,drive=stick \
+        -serial stdio | tee "$QEMU_LOG"
+    echo "==> QEMU session ended."
+    echo "    Full boot log saved at: $QEMU_LOG"
+    echo "    (open it with 'cat $QEMU_LOG' or copy/paste sections of it to share for troubleshooting)"
+else
+    echo "Skipping QEMU test. You can run it manually anytime with:"
+    echo "  qemu-system-x86_64 -m 2048 -device qemu-xhci -drive if=none,id=stick,format=raw,file=$WORKDIR/$ISO_NAME -device usb-storage,drive=stick -serial stdio | tee $WORKDIR/qemu-boot.log"
+fi
 
 # ---- Interactive: choose a USB device to burn the ISO to ----
 echo
