@@ -93,6 +93,24 @@ scripts/config --enable CONFIG_SQUASHFS
 scripts/config --enable CONFIG_ISO9660_FS
 scripts/config --enable CONFIG_BLK_DEV_LOOP
 scripts/config --enable CONFIG_OVERLAY_FS
+
+echo "==> Force-enabling USB/storage drivers as BUILT-IN (not modules)"
+echo "    This is critical: localmodconfig may have set these as loadable modules (=m),"
+echo "    but the BusyBox initramfs has no way to load kernel modules — so without this,"
+echo "    the USB drive never appears as a device at all during boot."
+scripts/config --enable CONFIG_USB
+scripts/config --enable CONFIG_USB_SUPPORT
+scripts/config --enable CONFIG_USB_XHCI_HCD
+scripts/config --enable CONFIG_USB_EHCI_HCD
+scripts/config --enable CONFIG_USB_OHCI_HCD
+scripts/config --enable CONFIG_USB_STORAGE
+scripts/config --enable CONFIG_SCSI
+scripts/config --enable CONFIG_BLK_DEV_SD
+scripts/config --enable CONFIG_BLK_DEV_SR
+scripts/config --enable CONFIG_ATA
+scripts/config --enable CONFIG_DEVTMPFS
+scripts/config --enable CONFIG_DEVTMPFS_MOUNT
+
 make olddefconfig
 
 echo "==> Compiling kernel with ccache (this will take a while on first build; much faster on rebuilds)"
@@ -150,9 +168,10 @@ DEV=""
 
 # Method 1: find by ISO volume label
 echo "Trying blkid label lookup for ${ISO_LABEL}..."
-for i in 1 2 3 4 5 6 7 8 9 10; do
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     DEV=\$(blkid -L "${ISO_LABEL}" 2>/dev/null)
     [ -n "\$DEV" ] && echo "Found via label: \$DEV" && break
+    echo "  attempt \$i: not found yet, current /dev/sd*: \$(ls /dev/sd* 2>/dev/null || echo none)"
     sleep 1
 done
 
