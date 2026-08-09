@@ -10,15 +10,35 @@
 # Usage:
 #   cd /path/to/your/linux-source
 #   chmod +x build_iso.sh
-#   ./build_iso.sh                  # normal build (incremental, uses existing .config if present)
-#   ./build_iso.sh fullfromscratch  # wipes ALL build artifacts and .config, rebuilds everything
+#   ./build_iso.sh                            # normal build, uses all CPU threads
+#   ./build_iso.sh fullfromscratch             # wipes ALL build artifacts and .config, rebuilds everything
+#   ./build_iso.sh 4                           # normal build, limited to 4 threads
+#   ./build_iso.sh fullfromscratch 4           # clean rebuild, limited to 4 threads
+#   (order of the two arguments doesn't matter)
 #
 # Always trims the config to your currently-loaded modules (localmodconfig)
 # for a faster build. See note below if you need broader hardware support.
 #
 set -euo pipefail
 
-BUILD_MODE="${1:-}"
+BUILD_MODE=""
+THREADS="$(nproc)"
+
+for arg in "$@"; do
+    if [ "$arg" = "fullfromscratch" ]; then
+        BUILD_MODE="fullfromscratch"
+    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+        THREADS="$arg"
+    else
+        echo "WARNING: unrecognized argument '$arg' — ignoring."
+        echo "Valid arguments: 'fullfromscratch' and/or a number of threads (e.g. 4)."
+    fi
+done
+
+echo "==> Using $THREADS thread(s) for compilation (system has $(nproc) available)"
+
+START_TIME=$(date +%s)
+echo "==> Build started at: $(date -d "@$START_TIME" '+%Y-%m-%d %H:%M:%S')"
 
 # Sanity check: make sure we're actually in a kernel source tree
 if [ ! -f "Makefile" ] || [ ! -d "kernel" ] || [ ! -d "arch" ]; then
@@ -69,7 +89,7 @@ echo "    the 'make localmodconfig' line below to build the full config instead.
 make localmodconfig
 
 echo "==> Compiling kernel with ccache (this will take a while on first build; much faster on rebuilds)"
-make CC="ccache gcc" -j"$(nproc)"
+make CC="ccache gcc" -j"$THREADS"
 
 echo "ccache stats after build:"
 ccache -s
@@ -123,6 +143,14 @@ EOF
 
 grub-mkrescue -o "$WORKDIR/$ISO_NAME" "$ISO_DIR"
 
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+ELAPSED_MIN=$((ELAPSED / 60))
+ELAPSED_SEC=$((ELAPSED % 60))
+
+echo "==> Build started at:  $(date -d "@$START_TIME" '+%Y-%m-%d %H:%M:%S')"
+echo "==> Build finished at: $(date -d "@$END_TIME" '+%Y-%m-%d %H:%M:%S')"
+echo "==> Total time: ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
 echo "==> Done. ISO created at: $WORKDIR/$ISO_NAME"
 echo
 echo "Test it first in a VM before touching a real USB drive:"
