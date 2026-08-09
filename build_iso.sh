@@ -111,7 +111,29 @@ scripts/config --enable CONFIG_ATA
 scripts/config --enable CONFIG_DEVTMPFS
 scripts/config --enable CONFIG_DEVTMPFS_MOUNT
 
+echo "==> Disabling debug info to shrink vmlinux.o (reduces peak RAM needed at the link step)"
+scripts/config --disable CONFIG_DEBUG_INFO
+scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
+
 make olddefconfig
+
+# ---- Set up swap if none exists, so the linker doesn't get OOM-killed on low-RAM systems ----
+# The final LD vmlinux.o step is single-threaded and can spike to several GB regardless of
+# -j/thread count — swap is what actually prevents Error 137 (OOM kill) at that step.
+CURRENT_SWAP=$(free -m | awk '/^Swap:/{print $2}')
+if [ "$CURRENT_SWAP" -lt 4096 ]; then
+    SWAPFILE="$HOME/kernel-build-swapfile"
+    if [ ! -f "$SWAPFILE" ]; then
+        echo "==> Less than 4GB swap detected — creating an 8GB swapfile to prevent OOM during linking"
+        sudo fallocate -l 8G "$SWAPFILE"
+        sudo chmod 600 "$SWAPFILE"
+        sudo mkswap "$SWAPFILE"
+    fi
+    sudo swapon "$SWAPFILE" 2>/dev/null || echo "    (swapfile already active)"
+    echo "    Swap now active: $(free -h | awk '/^Swap:/{print $2}')"
+else
+    echo "==> Sufficient swap already present ($(( CURRENT_SWAP / 1024 ))GB) — skipping swapfile creation"
+fi
 
 echo "==> Compiling kernel with ccache (this will take a while on first build; much faster on rebuilds)"
 make CC="ccache gcc" -j"$THREADS"
