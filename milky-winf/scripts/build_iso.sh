@@ -15,7 +15,8 @@
 #   ./build_iso.sh fullfromscratch             # wipes ALL build artifacts and .config, rebuilds everything
 #   ./build_iso.sh 4                           # normal build, limited to 4 threads
 #   ./build_iso.sh fullfromscratch 4           # clean rebuild, limited to 4 threads
-#   (order of the two arguments doesn't matter)
+#   ./build_iso.sh includedir=/path/to/dir     # also copies that directory into /root/Code in the live system
+#   (all arguments can be combined, order doesn't matter)
 #
 # Always trims the KERNEL config to your currently-loaded modules (localmodconfig)
 # for a faster build, but force-enables squashfs/iso9660/loop support since the
@@ -25,17 +26,25 @@ set -euo pipefail
 
 BUILD_MODE=""
 THREADS="$(nproc)"
+INCLUDE_DIR=""
 
 for arg in "$@"; do
     if [ "$arg" = "fullfromscratch" ]; then
         BUILD_MODE="fullfromscratch"
     elif [[ "$arg" =~ ^[0-9]+$ ]]; then
         THREADS="$arg"
+    elif [[ "$arg" == includedir=* ]]; then
+        INCLUDE_DIR="${arg#includedir=}"
     else
         echo "WARNING: unrecognized argument '$arg' — ignoring."
-        echo "Valid arguments: 'fullfromscratch' and/or a number of threads (e.g. 4)."
+        echo "Valid arguments: 'fullfromscratch', a number of threads (e.g. 4), or 'includedir=/path'."
     fi
 done
+
+if [ -n "$INCLUDE_DIR" ] && [ ! -d "$INCLUDE_DIR" ]; then
+    echo "ERROR: includedir path '$INCLUDE_DIR' does not exist or is not a directory."
+    exit 1
+fi
 
 echo "==> Using $THREADS thread(s) for compilation (system has $(nproc) available)"
 
@@ -171,6 +180,22 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
 AUTOLOGIN_EOF
 echo "    Auto-login enabled on tty1 — should boot straight to a root shell, no password needed"
+
+echo "==> Masking systemd-logind (not needed for a single-shell live image, was causing restart-loop spam)"
+sudo systemctl --root="$ROOTFS_DIR" mask systemd-logind.service systemd-logind.socket
+# Belt-and-suspenders: create the mask symlinks directly too, in case systemctl --root
+# didn't fully suppress activation via socket/dbus triggers in this minimal image.
+sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.service"
+sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.socket"
+
+echo "==> Preparing /root/Code directory"
+sudo mkdir -p "$ROOTFS_DIR/root/Code"
+
+if [ -n "$INCLUDE_DIR" ]; then
+    INCLUDE_NAME="$(basename "$INCLUDE_DIR")"
+    echo "==> Copying $INCLUDE_DIR into /root/Code/$INCLUDE_NAME in the live system"
+    sudo cp -a "$INCLUDE_DIR" "$ROOTFS_DIR/root/Code/$INCLUDE_NAME"
+fi
 
 echo "==> Squashing root filesystem (this can take a few minutes)"
 rm -f "$WORKDIR/airootfs.sfs"
