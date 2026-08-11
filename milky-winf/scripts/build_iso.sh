@@ -298,9 +298,24 @@ if [ ! -f /mnt/cdrom/LiveOS/airootfs.sfs ]; then
     exec /bin/sh
 fi
 
-echo "Loop-mounting the squashfs root filesystem..."
-mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /newroot || {
+echo "Loop-mounting the squashfs root filesystem (read-only lower layer)..."
+mkdir -p /mnt/squashfs-ro
+mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /mnt/squashfs-ro || {
     echo "ERROR: failed to mount squashfs. Dropping to rescue shell."
+    exec /bin/sh
+}
+
+echo "Setting up a writable overlay (tmpfs, RAM-backed) on top of the read-only rootfs..."
+echo "NOTE: writes (like g++ output) now work, but are lost on reboot since it's RAM-backed."
+mkdir -p /mnt/overlay
+mount -t tmpfs tmpfs /mnt/overlay || {
+    echo "ERROR: failed to mount tmpfs for overlay. Dropping to rescue shell."
+    exec /bin/sh
+}
+mkdir -p /mnt/overlay/upper /mnt/overlay/work
+
+mount -t overlay overlay -o lowerdir=/mnt/squashfs-ro,upperdir=/mnt/overlay/upper,workdir=/mnt/overlay/work /newroot || {
+    echo "ERROR: failed to mount overlay filesystem. Dropping to rescue shell."
     exec /bin/sh
 }
 
@@ -310,7 +325,7 @@ if [ ! -x /newroot/sbin/init ] && [ ! -x /newroot/usr/lib/systemd/systemd ]; the
     ls -la /newroot
 fi
 
-echo "Switching to full root filesystem (g++, Boost, git should be available after this)..."
+echo "Switching to full, WRITABLE root filesystem (g++, Boost, git should be available after this)..."
 exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
 EOF
 chmod +x init
