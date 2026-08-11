@@ -182,11 +182,12 @@ AUTOLOGIN_EOF
 echo "    Auto-login enabled on tty1 — should boot straight to a root shell, no password needed"
 
 echo "==> Masking systemd-logind (not needed for a single-shell live image, was causing restart-loop spam)"
-sudo systemctl --root="$ROOTFS_DIR" mask systemd-logind.service systemd-logind.socket
+sudo systemctl --root="$ROOTFS_DIR" mask systemd-logind.service systemd-logind.socket systemd-logind-varlink.socket
 # Belt-and-suspenders: create the mask symlinks directly too, in case systemctl --root
 # didn't fully suppress activation via socket/dbus triggers in this minimal image.
 sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.service"
 sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.socket"
+sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind-varlink.socket"
 
 echo "==> Preparing /root/Code directory"
 sudo mkdir -p "$ROOTFS_DIR/root/Code"
