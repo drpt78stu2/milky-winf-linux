@@ -166,7 +166,7 @@ ROOTFS_DIR="$WORKDIR/rootfs"
 sudo rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR"
 
-sudo pacstrap -c "$ROOTFS_DIR" base gcc boost boost-libs git nano
+sudo pacstrap -c "$ROOTFS_DIR" base gcc boost boost-libs git nano sudo fastfetch
 
 echo "==> Setting root password and enabling auto-login (fresh pacstrap accounts have no valid password)"
 echo "root:live" | sudo arch-chroot "$ROOTFS_DIR" chpasswd
@@ -224,11 +224,16 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || mdev -s
 
-# Redirect this script's own output (and input) to the serial console explicitly.
-# Without this, our echo statements go to whichever console is "primary" (often
-# the graphical tty0 window), while kernel messages go to both — causing the
-# serial log (captured by qemu -serial stdio) to look incomplete.
-exec 0</dev/ttyS0 1>/dev/ttyS0 2>&1
+# Redirect this script's own output (and input) to the serial console explicitly,
+# but ONLY if that device actually exists. On QEMU, /dev/ttyS0 is always present,
+# so this makes boot logs capturable via -serial stdio. On REAL hardware without a
+# serial port, /dev/ttyS0 doesn't exist — and since 'exec' is a shell special
+# builtin, a FAILED redirection on it terminates the shell immediately. That shell
+# is PID 1 here, so it would crash the kernel with "Attempted to kill init!" the
+# instant this ran. Guarding with a device check avoids that entirely.
+if [ -c /dev/ttyS0 ]; then
+    exec 0</dev/ttyS0 1>/dev/ttyS0 2>&1
+fi
 
 echo "=================================================="
 echo "  Boot init starting — looking for live media"
