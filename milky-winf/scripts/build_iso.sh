@@ -50,7 +50,8 @@ sudo pacman -Syu --needed --noconfirm \
 
 export PATH="/usr/lib/ccache/bin:$PATH"
 export CCACHE_DIR="$HOME/.ccache"
-ccache -M 10G >/dev/null
+# Adjusted ccache to 2GB to save disk space
+ccache -M 2G >/dev/null
 
 echo "==> Configuring kernel..."
 if [ -f ".config" ]; then
@@ -61,10 +62,10 @@ else
     make defconfig
 fi
 
-# Apply localmodconfig to speed up compilation, but re-enable broad hardware support below
+# Apply localmodconfig to speed up compilation
 make localmodconfig
 
-echo "==> Enforcing required filesystems, storage, and graphics support..."
+echo "==> Enforcing required filesystems, display drivers, and storage support..."
 # Filesystem & Overlay support for Live ISO
 scripts/config --enable CONFIG_SQUASHFS
 scripts/config --enable CONFIG_SQUASHFS_ZLIB
@@ -72,6 +73,13 @@ scripts/config --enable CONFIG_SQUASHFS_XZ
 scripts/config --enable CONFIG_ISO9660_FS
 scripts/config --enable CONFIG_BLK_DEV_LOOP
 scripts/config --enable CONFIG_OVERLAY_FS
+
+# Display / Framebuffer support (Fixes black screen issue)
+scripts/config --enable CONFIG_FB
+scripts/config --enable CONFIG_FB_EFI
+scripts/config --enable CONFIG_FB_VESA
+scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+scripts/config --enable CONFIG_DRM_FBDEV_EMULATION
 
 # Core USB & SCSI drivers
 scripts/config --enable CONFIG_USB
@@ -84,7 +92,7 @@ scripts/config --enable CONFIG_SCSI
 scripts/config --enable CONFIG_BLK_DEV_SD
 scripts/config --enable CONFIG_BLK_DEV_SR
 
-# Re-enable ATA/SATA & NVMe for laptop storage controllers
+# Storage controllers for modern laptops
 scripts/config --enable CONFIG_ATA
 scripts/config --enable CONFIG_SATA_AHCI
 scripts/config --enable CONFIG_BLK_DEV_NVME
@@ -165,10 +173,7 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || mdev -s
 
-if [ -c /dev/ttyS0 ]; then
-    exec 0</dev/ttyS0 1>/dev/ttyS0 2>&1
-fi
-
+# Remove serial console override so output goes to screen
 echo "=================================================="
 echo "  Boot init starting — looking for live media"
 echo "=================================================="
@@ -239,8 +244,8 @@ cat > "$ISO_DIR/boot/grub/grub.cfg" <<EOF
 set timeout=5
 set default=0
 
-menuentry "Custom Linux ${KVER}" {
-    linux /boot/vmlinuz loglevel=3 quiet
+menuentry "Custom Linux ${KVER} (Verbose Boot)" {
+    linux /boot/vmlinuz nomodeset vga=current keep_bootcon loglevel=7
     initrd /boot/initramfs.img
 }
 EOF
