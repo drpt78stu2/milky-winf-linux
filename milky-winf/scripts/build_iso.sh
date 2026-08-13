@@ -375,7 +375,7 @@ set timeout=5
 set default=0
 
 menuentry "Custom Linux ${KVER} (full rootfs: g++, Boost, git)" {
-    linux /boot/vmlinuz console=ttyS0 console=tty0
+    linux /boot/vmlinuz console=ttyS0 console=tty0 nomodeset
     initrd /boot/initramfs.img
 }
 EOF
