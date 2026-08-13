@@ -79,7 +79,7 @@ scripts/config --enable CONFIG_FB_VESA
 scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
 scripts/config --enable CONFIG_DRM_FBDEV_EMULATION
 
-# Core USB & SCSI drivers (CRITICAL: CONFIG_USB_UAS is required for USB 3.0/3.2 drives)
+# Core USB & SCSI drivers (CONFIG_USB_UAS is required for USB 3.0/3.2 drives)
 scripts/config --enable CONFIG_USB
 scripts/config --enable CONFIG_USB_SUPPORT
 scripts/config --enable CONFIG_USB_XHCI_HCD
@@ -219,9 +219,15 @@ mount -t iso9660 -o ro "$DEV" /mnt/cdrom || respawn_shell
 mkdir -p /mnt/squashfs-ro
 mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /mnt/squashfs-ro || respawn_shell
 
-mkdir -p /mnt/overlay /mnt/overlay/upper /mnt/overlay/work
+# --- OVERLAY FS SETUP FIX ---
+# 1. Mount RAM-backed tmpfs FIRST
+mkdir -p /mnt/overlay /newroot
 mount -t tmpfs tmpfs /mnt/overlay || respawn_shell
 
+# 2. Create upper/work directories INSIDE the mounted tmpfs
+mkdir -p /mnt/overlay/upper /mnt/overlay/work
+
+# 3. Mount overlayfs
 mount -t overlay overlay -o lowerdir=/mnt/squashfs-ro,upperdir=/mnt/overlay/upper,workdir=/mnt/overlay/work /newroot || respawn_shell
 
 exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
