@@ -238,6 +238,21 @@ fi
 echo "=================================================="
 echo "  Boot init starting — looking for live media"
 echo "=================================================="
+
+# Safety net: PID 1 must never exit, or the kernel panics ("Attempted to kill init!").
+# This can happen on real hardware if a fallback rescue shell hits EOF on stdin
+# (console/keyboard timing can differ from QEMU). Instead of 'exec /bin/sh' directly,
+# every fallback below calls this function, which respawns the shell in a loop
+# rather than letting it actually terminate PID 1.
+respawn_shell() {
+    while true; do
+        /bin/sh
+        echo "Shell exited (stdin EOF or similar) — respawning in 2s to avoid a kernel panic."
+        echo "If this loops repeatedly, the console/keyboard isn't being read correctly."
+        sleep 2
+    done
+}
+
 echo "Available block devices:"
 ls -la /dev/sd* /dev/sr* 2>/dev/null
 echo "--------------------------------------------------"
@@ -287,13 +302,13 @@ if [ -z "\$DEV" ]; then
     echo "Dropping to a BusyBox rescue shell — git/gcc will NOT be available here."
     echo "Run 'blkid' and 'ls /dev' manually to investigate, then 'mount' by hand."
     echo "=================================================="
-    exec /bin/sh
+    respawn_shell
 fi
 
 echo "Mounting \$DEV as ISO..."
 mount -t iso9660 -o ro "\$DEV" /mnt/cdrom || {
     echo "ERROR: failed to mount \$DEV as iso9660. Dropping to rescue shell."
-    exec /bin/sh
+    respawn_shell
 }
 
 if [ ! -f /mnt/cdrom/LiveOS/airootfs.sfs ]; then
@@ -301,14 +316,14 @@ if [ ! -f /mnt/cdrom/LiveOS/airootfs.sfs ]; then
     echo "Contents of /mnt/cdrom:"
     ls -la /mnt/cdrom
     echo "Dropping to rescue shell."
-    exec /bin/sh
+    respawn_shell
 fi
 
 echo "Loop-mounting the squashfs root filesystem (read-only lower layer)..."
 mkdir -p /mnt/squashfs-ro
 mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /mnt/squashfs-ro || {
     echo "ERROR: failed to mount squashfs. Dropping to rescue shell."
-    exec /bin/sh
+    respawn_shell
 }
 
 echo "Setting up a writable overlay (tmpfs, RAM-backed) on top of the read-only rootfs..."
@@ -316,13 +331,13 @@ echo "NOTE: writes (like g++ output) now work, but are lost on reboot since it's
 mkdir -p /mnt/overlay
 mount -t tmpfs tmpfs /mnt/overlay || {
     echo "ERROR: failed to mount tmpfs for overlay. Dropping to rescue shell."
-    exec /bin/sh
+    respawn_shell
 }
 mkdir -p /mnt/overlay/upper /mnt/overlay/work
 
 mount -t overlay overlay -o lowerdir=/mnt/squashfs-ro,upperdir=/mnt/overlay/upper,workdir=/mnt/overlay/work /newroot || {
     echo "ERROR: failed to mount overlay filesystem. Dropping to rescue shell."
-    exec /bin/sh
+    respawn_shell
 }
 
 if [ ! -x /newroot/sbin/init ] && [ ! -x /newroot/usr/lib/systemd/systemd ]; then
@@ -333,6 +348,8 @@ fi
 
 echo "Switching to full, WRITABLE root filesystem (g++, Boost, git should be available after this)..."
 exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
+echo "ERROR: switch_root itself could not be launched at all — this should be rare."
+respawn_shell
 EOF
 chmod +x init
 
