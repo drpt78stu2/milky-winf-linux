@@ -50,7 +50,6 @@ sudo pacman -Syu --needed --noconfirm \
 
 export PATH="/usr/lib/ccache/bin:$PATH"
 export CCACHE_DIR="$HOME/.ccache"
-# Adjusted ccache to 2GB to save disk space
 ccache -M 2G >/dev/null
 
 echo "==> Configuring kernel..."
@@ -62,7 +61,6 @@ else
     make defconfig
 fi
 
-# Apply localmodconfig to speed up compilation
 make localmodconfig
 
 echo "==> Enforcing required filesystems, display drivers, and storage support..."
@@ -74,20 +72,21 @@ scripts/config --enable CONFIG_ISO9660_FS
 scripts/config --enable CONFIG_BLK_DEV_LOOP
 scripts/config --enable CONFIG_OVERLAY_FS
 
-# Display / Framebuffer support (Fixes black screen issue)
+# Display / Framebuffer support
 scripts/config --enable CONFIG_FB
 scripts/config --enable CONFIG_FB_EFI
 scripts/config --enable CONFIG_FB_VESA
 scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
 scripts/config --enable CONFIG_DRM_FBDEV_EMULATION
 
-# Core USB & SCSI drivers
+# Core USB & SCSI drivers (CRITICAL: CONFIG_USB_UAS is required for USB 3.0/3.2 drives)
 scripts/config --enable CONFIG_USB
 scripts/config --enable CONFIG_USB_SUPPORT
 scripts/config --enable CONFIG_USB_XHCI_HCD
 scripts/config --enable CONFIG_USB_EHCI_HCD
 scripts/config --enable CONFIG_USB_OHCI_HCD
 scripts/config --enable CONFIG_USB_STORAGE
+scripts/config --enable CONFIG_USB_UAS
 scripts/config --enable CONFIG_SCSI
 scripts/config --enable CONFIG_BLK_DEV_SD
 scripts/config --enable CONFIG_BLK_DEV_SR
@@ -107,7 +106,6 @@ scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
 
 make olddefconfig
 
-# Setup Swap safety net
 CURRENT_SWAP=$(free -m | awk '/^Swap:/{print $2}')
 if [ "$CURRENT_SWAP" -lt 4096 ]; then
     SWAPFILE="$HOME/kernel-build-swapfile"
@@ -126,7 +124,6 @@ KVER="$(make -s kernelrelease)"
 ISO_NAME="custom-linux-${KVER}.iso"
 ISO_LABEL="MYLINUXISO"
 
-# Build Root Filesystem via pacstrap
 ROOTFS_DIR="$WORKDIR/rootfs"
 sudo rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR"
@@ -156,24 +153,22 @@ fi
 rm -f "$WORKDIR/airootfs.sfs"
 sudo mksquashfs "$ROOTFS_DIR" "$WORKDIR/airootfs.sfs" -comp gzip -noappend
 
-# Build BusyBox initramfs
 INITRD_DIR="$WORKDIR/initramfs"
 rm -rf "$INITRD_DIR"
 mkdir -p "$INITRD_DIR"/{bin,sbin,etc,proc,sys,dev,mnt/cdrom,mnt/test,newroot,usr/bin,usr/sbin}
 cp "$(command -v busybox)" "$INITRD_DIR/bin/busybox"
 
 cd "$INITRD_DIR"
-for cmd in sh ls mount switch_root cat mkdir blkid losetup mknod sleep; do
+for cmd in sh ls mount switch_root cat mkdir blkid losetup mknod sleep seq grep cut head; do
     ln -sf busybox "bin/$cmd"
 done
 
-cat > init <<'EOF'
+cat > init <<'INIT_EOF'
 #!/bin/busybox sh
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || mdev -s
 
-# Remove serial console override so output goes to screen
 echo "=================================================="
 echo "  Boot init starting — looking for live media"
 echo "=================================================="
@@ -184,6 +179,11 @@ respawn_shell() {
         sleep 2
     done
 }
+
+# Pause to allow USB 3.0 controller enumeration
+echo "Waiting for USB storage devices to settle..."
+sleep 3
+mdev -s 2>/dev/null || true
 
 DEV=""
 for i in $(seq 1 15); do
@@ -226,12 +226,11 @@ mount -t overlay overlay -o lowerdir=/mnt/squashfs-ro,upperdir=/mnt/overlay/uppe
 
 exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
 respawn_shell
-EOF
+INIT_EOF
 chmod +x init
 
 find . | cpio -o -H newc | gzip > "$WORKDIR/initramfs.img"
 
-# Assemble ISO
 ISO_DIR="$WORKDIR/isoroot"
 rm -rf "$ISO_DIR"
 mkdir -p "$ISO_DIR/boot/grub" "$ISO_DIR/LiveOS"
@@ -240,7 +239,7 @@ cp "$SRC_DIR/arch/x86/boot/bzImage" "$ISO_DIR/boot/vmlinuz"
 cp "$WORKDIR/initramfs.img" "$ISO_DIR/boot/initramfs.img"
 cp "$WORKDIR/airootfs.sfs" "$ISO_DIR/LiveOS/airootfs.sfs"
 
-cat > "$ISO_DIR/boot/grub/grub.cfg" <<EOF
+cat > "$ISO_DIR/boot/grub/grub.cfg" <<GRUB_EOF
 set timeout=5
 set default=0
 
@@ -248,7 +247,7 @@ menuentry "Custom Linux ${KVER} (Verbose Boot)" {
     linux /boot/vmlinuz nomodeset vga=current keep_bootcon loglevel=7
     initrd /boot/initramfs.img
 }
-EOF
+GRUB_EOF
 
 grub-mkrescue -volid "$ISO_LABEL" -o "$WORKDIR/$ISO_NAME" "$ISO_DIR"
 
