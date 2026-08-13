@@ -118,7 +118,11 @@ scripts/config --enable CONFIG_USB_STORAGE
 scripts/config --enable CONFIG_SCSI
 scripts/config --enable CONFIG_BLK_DEV_SD
 scripts/config --enable CONFIG_BLK_DEV_SR
-scripts/config --enable CONFIG_ATA
+# NOTE: CONFIG_ATA was previously force-enabled here but caused a hard hang during
+# hardware probing on real laptop hardware (never showed up in QEMU). It isn't
+# actually needed for booting off a USB stick — USB_STORAGE + SCSI + xHCI cover
+# that path — so it's removed rather than risk conflicting with this machine's
+# real SATA/NVMe controller.
 scripts/config --enable CONFIG_DEVTMPFS
 scripts/config --enable CONFIG_DEVTMPFS_MOUNT
 
