@@ -63,7 +63,7 @@ fi
 
 make localmodconfig
 
-echo "==> Enforcing required filesystems, display drivers, and storage support..."
+echo "==> Enforcing required filesystems, display drivers, storage, and wireless support..."
 # Filesystem & Overlay support for Live ISO
 scripts/config --enable CONFIG_SQUASHFS
 scripts/config --enable CONFIG_SQUASHFS_ZLIB
@@ -72,6 +72,13 @@ scripts/config --enable CONFIG_ISO9660_FS
 scripts/config --enable CONFIG_BLK_DEV_LOOP
 scripts/config --enable CONFIG_OVERLAY_FS
 
+# FAT / vFAT / exFAT USB Support
+scripts/config --enable CONFIG_FAT_FS
+scripts/config --enable CONFIG_VFAT_FS
+scripts/config --enable CONFIG_EXFAT_FS
+scripts/config --enable CONFIG_NLS_CODEPAGE_437
+scripts/config --enable CONFIG_NLS_ISO8859_1
+
 # Display / Framebuffer support
 scripts/config --enable CONFIG_FB
 scripts/config --enable CONFIG_FB_EFI
@@ -79,7 +86,7 @@ scripts/config --enable CONFIG_FB_VESA
 scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
 scripts/config --enable CONFIG_DRM_FBDEV_EMULATION
 
-# Core USB & SCSI drivers (CONFIG_USB_UAS is required for USB 3.0/3.2 drives)
+# Core USB & SCSI drivers (CONFIG_USB_UAS for USB 3.0/3.2 drives)
 scripts/config --enable CONFIG_USB
 scripts/config --enable CONFIG_USB_SUPPORT
 scripts/config --enable CONFIG_USB_XHCI_HCD
@@ -95,6 +102,12 @@ scripts/config --enable CONFIG_BLK_DEV_SR
 scripts/config --enable CONFIG_ATA
 scripts/config --enable CONFIG_SATA_AHCI
 scripts/config --enable CONFIG_BLK_DEV_NVME
+
+# Wireless (Wi-Fi) Kernel Subsystems
+scripts/config --enable CONFIG_NET
+scripts/config --enable CONFIG_WIRELESS
+scripts/config --enable CONFIG_CFG80211
+scripts/config --enable CONFIG_MAC80211
 
 # Devtmpfs for boot initialization
 scripts/config --enable CONFIG_DEVTMPFS
@@ -128,7 +141,12 @@ ROOTFS_DIR="$WORKDIR/rootfs"
 sudo rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR"
 
-sudo pacstrap -c "$ROOTFS_DIR" base gcc boost boost-libs git nano sudo fastfetch
+echo "==> Installing Base OS + Wi-Fi & System Tools via pacstrap"
+sudo pacstrap -c "$ROOTFS_DIR" \
+    base linux-firmware \
+    gcc boost boost-libs git nano sudo fastfetch \
+    iwd networkmanager wpa_supplicant wireless_regdb iw \
+    dosfstools exfatprogs
 
 echo "root:live" | sudo arch-chroot "$ROOTFS_DIR" chpasswd
 
@@ -143,6 +161,10 @@ sudo systemctl --root="$ROOTFS_DIR" mask systemd-logind.service systemd-logind.s
 sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.service"
 sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind.socket"
 sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind-varlink.socket"
+
+# Enable NetworkManager and iwd services for quick wireless access
+sudo systemctl --root="$ROOTFS_DIR" enable NetworkManager.service
+sudo systemctl --root="$ROOTFS_DIR" enable iwd.service
 
 sudo mkdir -p "$ROOTFS_DIR/root/Code"
 if [ -n "$INCLUDE_DIR" ]; then
@@ -180,7 +202,6 @@ respawn_shell() {
     done
 }
 
-# Pause to allow USB 3.0 controller enumeration
 echo "Waiting for USB storage devices to settle..."
 sleep 3
 mdev -s 2>/dev/null || true
@@ -219,15 +240,11 @@ mount -t iso9660 -o ro "$DEV" /mnt/cdrom || respawn_shell
 mkdir -p /mnt/squashfs-ro
 mount -t squashfs -o loop,ro /mnt/cdrom/LiveOS/airootfs.sfs /mnt/squashfs-ro || respawn_shell
 
-# --- OVERLAY FS SETUP FIX ---
-# 1. Mount RAM-backed tmpfs FIRST
 mkdir -p /mnt/overlay /newroot
 mount -t tmpfs tmpfs /mnt/overlay || respawn_shell
 
-# 2. Create upper/work directories INSIDE the mounted tmpfs
 mkdir -p /mnt/overlay/upper /mnt/overlay/work
 
-# 3. Mount overlayfs
 mount -t overlay overlay -o lowerdir=/mnt/squashfs-ro,upperdir=/mnt/overlay/upper,workdir=/mnt/overlay/work /newroot || respawn_shell
 
 exec switch_root /newroot /sbin/init 2>/dev/null || exec switch_root /newroot /bin/bash 2>/dev/null || exec switch_root /newroot /bin/sh
