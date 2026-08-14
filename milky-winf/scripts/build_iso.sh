@@ -275,3 +275,27 @@ GRUB_EOF
 grub-mkrescue -volid "$ISO_LABEL" -o "$WORKDIR/$ISO_NAME" "$ISO_DIR"
 
 echo "==> ISO created successfully at: $WORKDIR/$ISO_NAME"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_SCRIPT="$SCRIPT_DIR/test_iso.sh"
+
+TEST_ANSWER="n"
+if [ -t 0 ]; then
+    read -r -p "==> Do you want to test the ISO now? [y/N] " TEST_ANSWER || TEST_ANSWER="n"
+else
+    echo "==> Non-interactive shell detected, skipping test prompt."
+fi
+
+case "$TEST_ANSWER" in
+    [Yy]|[Yy][Ee][Ss])
+        if [ ! -f "$TEST_SCRIPT" ]; then
+            echo "ERROR: test_iso.sh not found next to build_iso.sh ($TEST_SCRIPT)"
+            exit 1
+        fi
+        bash "$TEST_SCRIPT" "$WORKDIR/$ISO_NAME"
+        ;;
+    *)
+        echo "==> Skipping test. You can test it later with:"
+        echo "      $TEST_SCRIPT \"$WORKDIR/$ISO_NAME\""
+        ;;
+esac
