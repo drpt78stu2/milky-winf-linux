@@ -123,6 +123,10 @@ scripts/config --enable CONFIG_WIRELESS
 scripts/config --enable CONFIG_CFG80211
 scripts/config --enable CONFIG_MAC80211
 
+# rfkill (Wi-Fi kill-switch state tracking; iwd uses this if present)
+scripts/config --enable CONFIG_RFKILL
+scripts/config --enable CONFIG_RFKILL_INPUT
+
 # Kernel crypto API support required by iwd (WPA/EAP handshake crypto)
 scripts/config --enable CONFIG_CRYPTO_USER_API_HASH
 scripts/config --enable CONFIG_CRYPTO_USER_API_SKCIPHER
