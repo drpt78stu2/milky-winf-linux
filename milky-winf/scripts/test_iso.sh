@@ -63,6 +63,7 @@ run_qemu() {
     local ram_mb=2048
     local cpus=2
     local kvm_args=()
+    local boot_log="${ISO_PATH}.bootlog.txt"
 
     if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
         kvm_args=(-enable-kvm -cpu host)
@@ -71,13 +72,25 @@ run_qemu() {
     fi
 
     echo "==> Booting '$ISO_PATH' in QEMU (${ram_mb}MB RAM, ${cpus} CPUs)..."
+    echo "==> Full boot log (kernel + init) will be saved to: $boot_log"
     qemu-system-x86_64 \
+        -machine q35 \
         -m "$ram_mb" \
         -smp "$cpus" \
         "${kvm_args[@]}" \
         -cdrom "$ISO_PATH" \
         -boot d \
+        -serial "file:$boot_log" \
         "$@"
+
+    echo "==> QEMU exited. Boot log saved to: $boot_log"
+
+    echo "==> Scanning boot log for failures/errors..."
+    if grep -i -E 'fail|error' "$boot_log"; then
+        echo "==> ^ found in: $boot_log"
+    else
+        echo "==> No 'fail'/'error' lines found in $boot_log"
+    fi
 }
 
 run_usb_burn() {

@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Resolve this script's directory as an absolute path up front, before
+# anything below has a chance to cd elsewhere (e.g. into the initramfs
+# staging dir) and break a relative invocation path.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_SCRIPT="$SCRIPT_DIR/test_iso.sh"
+
 BUILD_MODE=""
 THREADS="$(nproc)"
 INCLUDE_DIR=""
@@ -103,6 +109,14 @@ scripts/config --enable CONFIG_ATA
 scripts/config --enable CONFIG_SATA_AHCI
 scripts/config --enable CONFIG_BLK_DEV_NVME
 
+# Legacy IDE controller (e.g. QEMU's default machine type, older hardware)
+scripts/config --enable CONFIG_ATA_PIIX
+
+# Serial console support (for capturing boot logs during testing)
+scripts/config --enable CONFIG_SERIAL_8250
+scripts/config --enable CONFIG_SERIAL_8250_CONSOLE
+scripts/config --enable CONFIG_SERIAL_8250_PCI
+
 # Wireless (Wi-Fi) Kernel Subsystems
 scripts/config --enable CONFIG_NET
 scripts/config --enable CONFIG_WIRELESS
@@ -165,6 +179,49 @@ sudo ln -sf /dev/null "$ROOTFS_DIR/etc/systemd/system/systemd-logind-varlink.soc
 # Enable NetworkManager and iwd services for quick wireless access
 sudo systemctl --root="$ROOTFS_DIR" enable NetworkManager.service
 sudo systemctl --root="$ROOTFS_DIR" enable iwd.service
+
+# Boot diagnostics: after normal boot finishes, dump full status of any
+# failed unit to the serial console (ttyS0), which test_iso.sh already
+# captures to <iso>.bootlog.txt and scans for failures after QEMU exits.
+# This surfaces the real error (not just systemd's one-line "[FAILED]")
+# without needing to log into the running VM by hand.
+sudo tee "$ROOTFS_DIR/usr/local/bin/boot-diagnostics.sh" > /dev/null <<'DIAG_EOF'
+#!/bin/bash
+{
+    echo "===================================================="
+    echo " Boot diagnostics (failed units)"
+    echo "===================================================="
+    FAILED_UNITS="$(systemctl --failed --no-legend --plain | awk '{print $1}')"
+    if [ -z "$FAILED_UNITS" ]; then
+        echo "No failed units."
+    else
+        for u in $FAILED_UNITS; do
+            echo "---- $u ----"
+            systemctl status "$u" --no-pager -l
+            echo "---- $u journal ----"
+            journalctl -u "$u" -b --no-pager
+            echo
+        done
+    fi
+    echo "===================================================="
+} > /dev/ttyS0 2>&1
+DIAG_EOF
+sudo chmod +x "$ROOTFS_DIR/usr/local/bin/boot-diagnostics.sh"
+
+sudo tee "$ROOTFS_DIR/etc/systemd/system/boot-diagnostics.service" > /dev/null <<'DIAGUNIT_EOF'
+[Unit]
+Description=Dump failed-unit diagnostics to serial console
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/boot-diagnostics.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+DIAGUNIT_EOF
+sudo systemctl --root="$ROOTFS_DIR" enable boot-diagnostics.service
 
 sudo mkdir -p "$ROOTFS_DIR/root/Code"
 if [ -n "$INCLUDE_DIR" ]; then
@@ -267,7 +324,8 @@ set timeout=5
 set default=0
 
 menuentry "Custom Linux ${KVER} (Verbose Boot)" {
-    linux /boot/vmlinuz nomodeset vga=current keep_bootcon loglevel=7
+    set gfxpayload=text
+    linux /boot/vmlinuz nomodeset keep_bootcon loglevel=7 console=tty0 console=ttyS0,115200n8
     initrd /boot/initramfs.img
 }
 GRUB_EOF
@@ -275,9 +333,6 @@ GRUB_EOF
 grub-mkrescue -volid "$ISO_LABEL" -o "$WORKDIR/$ISO_NAME" "$ISO_DIR"
 
 echo "==> ISO created successfully at: $WORKDIR/$ISO_NAME"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEST_SCRIPT="$SCRIPT_DIR/test_iso.sh"
 
 TEST_ANSWER="n"
 if [ -t 0 ]; then
