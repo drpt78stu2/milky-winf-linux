@@ -145,7 +145,7 @@ echo "==> Installing Base OS + Wi-Fi & System Tools via pacstrap"
 sudo pacstrap -c "$ROOTFS_DIR" \
     base linux-firmware \
     gcc boost boost-libs git nano sudo fastfetch \
-    iwd networkmanager wpa_supplicant wireless_regdb iw \
+    iwd networkmanager wpa_supplicant wireless-regdb iw \
     dosfstools exfatprogs
 
 echo "root:live" | sudo arch-chroot "$ROOTFS_DIR" chpasswd
