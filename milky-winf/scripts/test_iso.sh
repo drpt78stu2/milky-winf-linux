@@ -85,9 +85,9 @@ run_qemu() {
 
     echo "==> QEMU exited. Boot log saved to: $boot_log"
 
-    echo "==> Scanning boot log for failures/errors..."
-    if grep -i -E 'fail|error' "$boot_log"; then
-        echo "==> ^ found in: $boot_log"
+    echo "==> Scanning boot log for failures/errors (with context)..."
+    if grep -i -E -B2 -A2 'fail|error' "$boot_log"; then
+        echo "==> ^ found in: $boot_log (full raw log also available there)"
     else
         echo "==> No 'fail'/'error' lines found in $boot_log"
     fi

@@ -123,6 +123,27 @@ scripts/config --enable CONFIG_WIRELESS
 scripts/config --enable CONFIG_CFG80211
 scripts/config --enable CONFIG_MAC80211
 
+# Kernel crypto API support required by iwd (WPA/EAP handshake crypto)
+scripts/config --enable CONFIG_CRYPTO_USER_API_HASH
+scripts/config --enable CONFIG_CRYPTO_USER_API_SKCIPHER
+scripts/config --enable CONFIG_CRYPTO_ECB
+scripts/config --enable CONFIG_CRYPTO_CBC
+scripts/config --enable CONFIG_CRYPTO_MD5
+scripts/config --enable CONFIG_CRYPTO_SHA1
+scripts/config --enable CONFIG_CRYPTO_SHA256
+scripts/config --enable CONFIG_CRYPTO_SHA512
+scripts/config --enable CONFIG_CRYPTO_AES
+scripts/config --enable CONFIG_CRYPTO_DES
+scripts/config --enable CONFIG_CRYPTO_CMAC
+scripts/config --enable CONFIG_CRYPTO_HMAC
+# Optimized x86 implementations of the above, if available for this kernel version
+scripts/config --enable CONFIG_CRYPTO_SHA1_SSSE3
+scripts/config --enable CONFIG_CRYPTO_SHA256_SSSE3
+scripts/config --enable CONFIG_CRYPTO_SHA512_SSSE3
+scripts/config --enable CONFIG_CRYPTO_AES_NI_INTEL
+scripts/config --enable CONFIG_CRYPTO_AES_X86_64
+scripts/config --enable CONFIG_CRYPTO_DES3_EDE_X86_64
+
 # Devtmpfs for boot initialization
 scripts/config --enable CONFIG_DEVTMPFS
 scripts/config --enable CONFIG_DEVTMPFS_MOUNT
@@ -204,11 +225,12 @@ sudo tee "$ROOTFS_DIR/usr/local/bin/boot-diagnostics.sh" > /dev/null <<'DIAG_EOF
     fi
 
     echo
-    echo "---- Full boot journal, filtered for fail/error/warn ----"
-    echo "     (catches transient failures that self-healed before"
-    echo "      the check above ran, e.g. a service retried and"
-    echo "      succeeded after its first attempt failed)"
-    journalctl -b --no-pager | grep -i -E 'fail|error|warn' || echo "No matching lines."
+    echo "---- Full boot journal (unfiltered) ----"
+    echo "     (kept unfiltered so no root-cause line is dropped before"
+    echo "      it's captured; test_iso.sh greps the saved log for"
+    echo "      fail/error after QEMU exits, but the raw file has"
+    echo "      everything if that grep misses something)"
+    journalctl -b --no-pager
 
     echo "===================================================="
 } > /dev/ttyS0 2>&1
