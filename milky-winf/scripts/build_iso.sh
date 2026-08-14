@@ -189,20 +189,27 @@ sudo tee "$ROOTFS_DIR/usr/local/bin/boot-diagnostics.sh" > /dev/null <<'DIAG_EOF
 #!/bin/bash
 {
     echo "===================================================="
-    echo " Boot diagnostics (failed units)"
+    echo " Boot diagnostics"
     echo "===================================================="
+
+    echo "---- systemctl --failed (as of now) ----"
     FAILED_UNITS="$(systemctl --failed --no-legend --plain | awk '{print $1}')"
     if [ -z "$FAILED_UNITS" ]; then
-        echo "No failed units."
+        echo "No units currently in failed state."
     else
         for u in $FAILED_UNITS; do
-            echo "---- $u ----"
+            echo "-- $u --"
             systemctl status "$u" --no-pager -l
-            echo "---- $u journal ----"
-            journalctl -u "$u" -b --no-pager
-            echo
         done
     fi
+
+    echo
+    echo "---- Full boot journal, filtered for fail/error/warn ----"
+    echo "     (catches transient failures that self-healed before"
+    echo "      the check above ran, e.g. a service retried and"
+    echo "      succeeded after its first attempt failed)"
+    journalctl -b --no-pager | grep -i -E 'fail|error|warn' || echo "No matching lines."
+
     echo "===================================================="
 } > /dev/ttyS0 2>&1
 DIAG_EOF
