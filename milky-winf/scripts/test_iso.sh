@@ -73,6 +73,7 @@ run_qemu() {
 
     echo "==> Booting '$ISO_PATH' in QEMU (${ram_mb}MB RAM, ${cpus} CPUs)..."
     echo "==> Full boot log (kernel + init) will be saved to: $boot_log"
+    
     qemu-system-x86_64 \
         -machine q35 \
         -m "$ram_mb" \
@@ -80,9 +81,9 @@ run_qemu() {
         "${kvm_args[@]}" \
         -cdrom "$ISO_PATH" \
         -boot d \
-        -serial "file:$boot_log" \
-        "$@"
-
+        -serial stdio \
+        "$@" | tee "$boot_log"
+        
     echo "==> QEMU exited. Boot log saved to: $boot_log"
 
     echo "==> Scanning boot log for failures/errors (with context)..."
